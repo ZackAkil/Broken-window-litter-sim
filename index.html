@@ -1,0 +1,622 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>1D Multi-Agent Flow with Lanes and Emojis</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for the graph -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Load Inter font -->
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Main Street Container - Holds the lanes and the street surface */
+        #street-blocks-container {
+            width: 100%;
+            height: 150px; /* Fixed height for lanes (100px) and street surface (50px) */
+            border-radius: 8px;
+            position: relative; 
+            margin-top: 50px; /* Adjusting margin for container top */
+            border: 2px solid #388E3C;
+            background-color: #388E3C; /* Dark green border/background for contrast */
+            overflow: hidden;
+        }
+
+        /* NEW: Container for the 50 street blocks (The actual green road surface) */
+        #street-surface {
+            position: absolute; 
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 50px; 
+            display: flex;
+            background-color: #4CAF50; /* Green road */
+            border-top: 2px solid #388E3C; 
+        }
+        
+        /* Individual Street Blocks (Litter state) */
+        .street-block {
+            flex-grow: 1;
+            height: 100%;
+            position: relative; 
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Litter Visualization */
+        .litter-emoji {
+            font-size: 20px;
+            opacity: 0.8;
+            pointer-events: none;
+            text-shadow: 0 0 5px rgba(0, 0, 0, 0.5);
+        }
+
+        /* Agent Visualization (Solid Square) */
+        .agent-block {
+            position: absolute;
+            width: calc(100% / 50); /* Width of one block */
+            height: 18px;
+            border-radius: 4px;
+            transition: left 0.1s linear; /* Smooth movement */
+            z-index: 10;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        /* Lane Positioning (Adjusted to sit above the 50px street surface) */
+        /* Street surface occupies 100px to 150px (bottom). */
+        .lane-0 { top: 75px; } /* Closest to street (75px is 25px above the street) */
+        .lane-1 { top: 50px; } /* Higher up */
+        .lane-2 { top: 25px; } 
+        .lane-3 { top: 0px; } /* Highest lane */
+
+        /* NEW: Visual separation lines for lanes */
+        .lane-line {
+            position: absolute; 
+            left: 0; 
+            width: 100%; 
+            height: 1px; 
+            background-color: rgba(255, 255, 255, 0.3);
+            z-index: 5;
+        }
+        .lane-line-0 { top: 97px; } /* Just above the street blocks */
+        .lane-line-1 { top: 72px; }
+        .lane-line-2 { top: 47px; }
+        .lane-line-3 { top: 22px; }
+
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4 md:p-8">
+
+    <div id="app" class="max-w-6xl mx-auto space-y-8">
+        <h1 class="text-4xl font-extrabold text-gray-900 border-b-4 border-indigo-600 pb-2">
+            1D Multi-Agent Flow with Lanes and Emojis
+        </h1>
+
+        <!-- Controls and Visualization Layout (Left Column: Controls, Right Column: Sim + Chart) -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            <!-- 1. Controls Panel (Left Column) -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-lg h-fit">
+                <h2 class="text-2xl font-bold text-indigo-700 mb-4">Simulation Flow Rates & Dynamics</h2>
+                
+                <div class="space-y-4">
+
+                    <!-- Control 1: Regular Person Flow Rate (Blue Squares) -->
+                    <div class="pt-2">
+                        <label for="regularFrequency" class="block text-sm font-medium text-blue-700">
+                            Regular Person Spawn Rate (<span id="regularValue">60</span>%) 👤
+                        </label>
+                        <p class="text-xs text-blue-500 mb-1">Chance a new Regular (Blue) agent is released on each tick (completely neutral).</p>
+                        <input type="range" id="regularFrequency" min="0" max="100" value="60" step="1" class="w-full h-2 bg-blue-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <!-- Control 2: Litter Picker Flow Rate (Green Squares) -->
+                    <div class="pt-4 border-t">
+                        <label for="pickerFrequency" class="block text-sm font-medium text-green-700">
+                            Litter Picker Spawn Rate (<span id="pickerValue">30</span>%) ✨
+                        </label>
+                        <p class="text-xs text-green-500 mb-1">Chance a new Picker (Green) agent is released on each tick (only picks up litter).</p>
+                        <input type="range" id="pickerFrequency" min="0" max="100" value="30" step="1" class="w-full h-2 bg-green-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    
+                    <!-- Control 3: Litter Picker Efficiency (Cleanup Probability) -->
+                    <div class="pt-4 border-t">
+                        <label for="pickerEfficiency" class="block text-sm font-medium text-green-700">
+                            Litter Picker Efficiency (Cleanup Probability) (<span id="pickerEfficiencyValue">100</span>%)
+                        </label>
+                        <p class="text-xs text-green-500 mb-1">Chance a Picker successfully cleans a littered block when passing over it. Simulates capacity limits.</p>
+                        <input type="range" id="pickerEfficiency" min="0" max="100" value="100" step="1" class="w-full h-2 bg-green-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <!-- Global Randomness Filter -->
+                    <div class="pt-4 border-t border-gray-300">
+                        <label for="randomFilter" class="block text-sm font-medium text-purple-700">
+                            Global Litter Drop Base Chance (<span id="filterValue">5</span>%)
+                        </label>
+                        <p class="text-xs text-purple-500 mb-1">The baseline chance for *any* person to drop litter on their current block.</p>
+                        <input type="range" id="randomFilter" min="0" max="50" value="5" step="1" class="w-full h-2 bg-purple-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    
+                    <!-- Broken Window Effect Controls -->
+                    <h3 class="text-lg font-bold text-gray-800 pt-4 border-t-2 border-dashed">Broken Window Effect</h3>
+
+                    <!-- Toggle Checkbox for the Effect -->
+                    <div class="flex items-center pt-2">
+                        <input type="checkbox" id="brokenWindowEnabled" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                        <label for="brokenWindowEnabled" class="ml-2 block text-sm font-medium text-gray-700">
+                            Broken Window Effect Enabled
+                        </label>
+                    </div>
+
+                    <!-- Low Litter Multiplier -->
+                    <div class="pt-2">
+                        <label for="lowLitterMultiplier" class="block text-sm font-medium text-indigo-700">
+                            Low Litter Multiplier (0 items) (<span id="lowLitterMultiplierValue">0.1</span>x)
+                        </label>
+                        <p class="text-xs text-indigo-500 mb-1">Multiplier applied to Base Drop Chance when street is perfectly clean (0 litter items).</p>
+                        <input type="range" id="lowLitterMultiplier" min="0" max="1" value="0.1" step="0.05" class="w-full h-2 bg-indigo-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <!-- High Litter Threshold -->
+                    <div class="pt-2">
+                        <label for="highLitterThreshold" class="block text-sm font-medium text-red-700">
+                            High Litter Threshold (<span id="highLitterThresholdValue">20</span> items)
+                        </label>
+                        <p class="text-xs text-red-500 mb-1">The litter count where the street is considered "broken" and the High Multiplier begins to apply.</p>
+                        <input type="range" id="highLitterThreshold" min="1" max="50" value="20" step="1" class="w-full h-2 bg-red-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+
+                    <!-- High Litter Multiplier -->
+                    <div class="pt-2">
+                        <label for="highLitterMultiplier" class="block text-sm font-medium text-red-700">
+                            High Litter Multiplier (Dirty Street) (<span id="highLitterMultiplierValue">3.0</span>x)
+                        </label>
+                        <p class="text-xs text-red-500 mb-1">Multiplier applied to Base Drop Chance when litter exceeds the threshold.</p>
+                        <input type="range" id="highLitterMultiplier" min="1" max="50" value="3.0" step="0.1" class="w-full h-2 bg-red-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                    
+                    <!-- Simulation Speed -->
+                    <div class="pt-4 border-t">
+                        <label for="speed" class="block text-sm font-medium text-gray-700">
+                            Simulation Speed (<span id="speedValue">50</span>ms interval)
+                        </label>
+                        <input type="range" id="speed" min="10" max="200" value="50" step="1" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                    </div>
+                </div>
+
+                <button id="toggleButton" class="mt-6 w-full py-3 px-4 rounded-lg font-semibold shadow-md transition duration-150 ease-in-out bg-green-600 hover:bg-green-700 text-white">
+                    Start Simulation
+                </button>
+            </div>
+
+            <!-- 2. Simulation and Chart (Right Column, Stacked) -->
+            <div class="lg:col-span-2 space-y-8">
+                
+                <!-- Street Visualization (Top of Right Column) -->
+                <div class="bg-white p-6 rounded-xl shadow-lg flex flex-col">
+                    <h2 class="text-2xl font-bold text-gray-700 mb-4">The 1D Street View (50 Blocks)</h2>
+                    <div id="street-blocks-container">
+                        <!-- Lane lines, Street Surface, Blocks, and Agents will be injected here -->
+                    </div>
+                    <div id="person-indicator" class="mt-2 text-center text-sm font-semibold text-gray-500">
+                        Active Agents: <span id="active-agents">0</span>
+                    </div>
+                </div>
+
+                <!-- Litter Chart (Bottom of Right Column) -->
+                <div class="bg-white p-6 rounded-xl shadow-lg">
+                    <h2 class="text-2xl font-bold text-indigo-700 mb-4">Total Litter Accumulation Over Time</h2>
+                    <div class="h-80">
+                        <canvas id="litterChart"></canvas>
+                    </div>
+                    <div id="stats" class="mt-4 text-center text-lg font-medium">
+                        Current Litter Count: <span id="litterCount" class="text-4xl text-red-600 font-extrabold">0</span> / 50
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript Logic -->
+    <script type="module">
+        // --- Constants ---
+        const STREET_LENGTH = 50;
+        const AGENT_COLORS = {
+            'regular': 'bg-blue-600',
+            'picker': 'bg-green-600'
+        };
+        const AGENT_LANE_POSITIONS = {
+            0: 'lane-0', 
+            1: 'lane-1', 
+            2: 'lane-2', 
+            3: 'lane-3' 
+        };
+        const LANE_LINE_POSITIONS = {
+            0: 'lane-line-0', 
+            1: 'lane-line-1', 
+            2: 'lane-line-2', 
+            3: 'lane-line-3'
+        };
+
+        // --- Core Simulation State ---
+        let streetData = new Array(STREET_LENGTH).fill(0); // 0 = clean, 1 = litter
+        let agents = []; // Array to hold active Agent instances
+        let simulationRunning = false;
+        let animationFrameId = null;
+        let lastUpdateTime = 0;
+        let currentSpeed = 50; // Initial interval in ms
+        let chart;
+        let chartData = {
+            labels: [],
+            data: [],
+            maxDataPoints: 50 
+        };
+
+        // --- Configuration (from UI) ---
+        let config = {
+            regularFrequency: 60,   // Spawn probability %
+            pickerFrequency: 30,    // Spawn probability %
+            pickerEfficiency: 100,  // Cleanup probability %
+            randomFilter: 5,        // Global litter drop chance % (Base Chance)
+
+            // Broken Window Params
+            isBrokenWindowEnabled: true, // NEW: Checkbox state
+            lowLitterMultiplier: 0.1, // Multiplier when litter count is 0
+            highLitterThreshold: 20,  // Threshold to trigger high multiplier
+            highLitterMultiplier: 3.0 // Multiplier when litter count is > threshold
+        };
+
+        // --- DOM Elements ---
+        const streetBlocksContainerEl = document.getElementById('street-blocks-container');
+        const toggleButton = document.getElementById('toggleButton');
+        const litterCountEl = document.getElementById('litterCount');
+        const activeAgentsEl = document.getElementById('active-agents');
+        const brokenWindowCheckbox = document.getElementById('brokenWindowEnabled'); // NEW
+
+        // --- Agent Class ---
+
+        class Agent {
+            constructor(type) {
+                this.id = crypto.randomUUID();
+                this.type = type;
+                this.direction = Math.random() < 0.5 ? 1 : -1; // 1: Right, -1: Left
+                this.position = this.direction === 1 ? -1 : STREET_LENGTH; // Start just off-screen
+                this.lane = Math.floor(Math.random() * 4); // Assign a lane (0, 1, 2, 3)
+                this.element = this.createVisualElement();
+                streetBlocksContainerEl.appendChild(this.element);
+            }
+
+            createVisualElement() {
+                const el = document.createElement('div');
+                el.id = `agent-${this.id}`;
+                // Apply base class, color, and lane position
+                el.classList.add('agent-block', AGENT_COLORS[this.type], AGENT_LANE_POSITIONS[this.lane]);
+                // Agents are now solid color squares
+                return el;
+            }
+
+            move() {
+                this.position += this.direction;
+                // Calculate percentage position for smooth CSS transition
+                this.element.style.left = `${(this.position * 100) / STREET_LENGTH}%`;
+                
+                // Check if the agent is still on the street
+                return this.position >= -1 && this.position <= STREET_LENGTH;
+            }
+
+            interact() {
+                const blockIndex = Math.round(this.position); 
+                if (blockIndex < 0 || blockIndex >= STREET_LENGTH) return; 
+
+                const currentLitterCount = streetData.filter(b => b === 1).length;
+                const currentLitterState = streetData[blockIndex];
+                let litterIsDropped = false;
+                let litterIsPickedUp = false;
+
+                // 1. Calculate Dynamic Litter Drop Chance (Broken Window Effect)
+                let dropChance = config.randomFilter;
+                
+                if (config.isBrokenWindowEnabled) { // Only apply if enabled
+                    if (currentLitterCount === 0) {
+                        // Street is perfectly clean: apply low multiplier
+                        dropChance *= config.lowLitterMultiplier;
+                    } else if (currentLitterCount >= config.highLitterThreshold) {
+                        // Street is dirty: apply high multiplier
+                        dropChance *= config.highLitterMultiplier;
+                    }
+                }
+                // Note: If disabled, dropChance remains equal to config.randomFilter
+
+                // 2. Drop Litter Check (Littering)
+                if (Math.random() * 100 < dropChance) {
+                    streetData[blockIndex] = 1; // Drop litter
+                    litterIsDropped = true;
+                }
+
+                // 3. Pickup Litter Check (Cleanup)
+                if (currentLitterState === 1 && !litterIsDropped) { 
+                    if (this.type === 'picker') {
+                        // Litter Picker attempts to clean based on Efficiency setting
+                        if (Math.random() * 100 < config.pickerEfficiency) {
+                            streetData[blockIndex] = 0; // Clean up
+                        }
+                    } 
+                    // Regular People (type 'regular') are completely neutral
+                }
+            }
+
+            remove() {
+                this.element.remove();
+            }
+        }
+
+        // --- Simulation Core ---
+
+        function spawnAgents() {
+            const agentTypes = [
+                { type: 'regular', prob: config.regularFrequency },
+                { type: 'picker', prob: config.pickerFrequency }
+            ];
+
+            agentTypes.forEach(agent => {
+                if (Math.random() * 100 < agent.prob) {
+                    agents.push(new Agent(agent.type));
+                }
+            });
+        }
+        
+        function updateAgents() {
+            const nextAgents = [];
+            
+            for (let i = 0; i < agents.length; i++) {
+                const agent = agents[i];
+                
+                // 1. Interaction (Drop/Pickup)
+                agent.interact();
+
+                // 2. Movement
+                const isStillOnStreet = agent.move();
+
+                // 3. Culling (Remove agents that have left the street)
+                if (isStillOnStreet) {
+                    nextAgents.push(agent);
+                } else {
+                    agent.remove();
+                }
+            }
+            
+            agents = nextAgents;
+            activeAgentsEl.textContent = agents.length;
+        }
+
+        // Main game loop function
+        function gameLoop(timestamp) {
+            if (!simulationRunning) {
+                return;
+            }
+
+            // Control the frame rate based on the user-set speed
+            if (timestamp - lastUpdateTime > currentSpeed) {
+                
+                // 1. Simulation Logic
+                spawnAgents();
+                updateAgents();
+                renderStreet(); // Update the visual state of the street blocks
+
+                // 2. Statistics and Chart Update
+                updateStats();
+
+                lastUpdateTime = timestamp;
+            }
+
+            animationFrameId = requestAnimationFrame(gameLoop);
+        }
+
+        // --- Rendering ---
+        
+        function initializeStreetBlocks() {
+            streetBlocksContainerEl.innerHTML = '';
+            
+            // Create the inner container for the street surface (where blocks go)
+            const streetSurface = document.createElement('div');
+            streetSurface.id = 'street-surface';
+            streetBlocksContainerEl.appendChild(streetSurface);
+
+            // Create four visual lane lines for context
+            for (let i = 0; i < 4; i++) {
+                 const laneLine = document.createElement('div');
+                 laneLine.classList.add('lane-line', LANE_LINE_POSITIONS[i]);
+                 streetBlocksContainerEl.appendChild(laneLine);
+            }
+            
+            // Create the 50 main street blocks inside streetSurface
+            for (let i = 0; i < STREET_LENGTH; i++) {
+                const block = document.createElement('div');
+                block.className = 'street-block';
+                block.id = `block-${i}`;
+                // Add the litter emoji placeholder inside the block
+                block.innerHTML = '<span class="litter-emoji hidden">🥤</span>'; 
+                streetSurface.appendChild(block); // Append to streetSurface
+            }
+        }
+
+        function renderStreet() {
+            for (let i = 0; i < STREET_LENGTH; i++) {
+                const blockEl = document.getElementById(`block-${i}`);
+                if (blockEl) {
+                    const litterEmojiEl = blockEl.querySelector('.litter-emoji');
+                    
+                    if (streetData[i] === 1) {
+                        // Litter present: Show the emoji
+                        if (litterEmojiEl) litterEmojiEl.classList.remove('hidden');
+                    } else {
+                        // Clean: Hide the emoji
+                        if (litterEmojiEl) litterEmojiEl.classList.add('hidden');
+                    }
+                }
+            }
+        }
+
+        // --- Chart & Stats ---
+        function initChart() {
+            const ctx = document.getElementById('litterChart').getContext('2d');
+            chart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: chartData.labels,
+                    datasets: [{
+                        label: 'Litter Count',
+                        data: chartData.data,
+                        borderColor: '#ef4444', 
+                        backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                        tension: 0.4,
+                        fill: true,
+                        pointRadius: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: STREET_LENGTH,
+                            title: {
+                                display: true,
+                                text: 'Total Litter on Street (Max 50)'
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Simulation Time (Ticks)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: { mode: 'index', intersect: false }
+                    }
+                }
+            });
+        }
+
+        function updateStats() {
+            const currentCount = streetData.filter(b => b === 1).length;
+            litterCountEl.textContent = currentCount;
+
+            // Update chart data
+            chartData.labels.push(chartData.labels.length);
+            chartData.data.push(currentCount);
+
+            // Keep data array size bounded
+            if (chartData.labels.length > chartData.maxDataPoints) {
+                chartData.labels.shift();
+                chartData.data.shift();
+            }
+
+            // Re-render chart
+            chart.update('none');
+        }
+
+        // --- UI Handlers and Initialization ---
+
+        function updateConfigFromUI() {
+            // Agent Frequencies (Flow Rates)
+            const regularRange = document.getElementById('regularFrequency');
+            const pickerRange = document.getElementById('pickerFrequency');
+            // Picker Efficiency
+            const efficiencyRange = document.getElementById('pickerEfficiency');
+            
+            // Global Randomness Filter
+            const filterRange = document.getElementById('randomFilter');
+            
+            // Broken Window Params
+            const lowMultRange = document.getElementById('lowLitterMultiplier');
+            const highThreshRange = document.getElementById('highLitterThreshold');
+            const highMultRange = document.getElementById('highLitterMultiplier');
+            const brokenWindowCheckbox = document.getElementById('brokenWindowEnabled'); // NEW
+
+            // Speed
+            const speedRange = document.getElementById('speed');
+
+            // Update config model
+            config.regularFrequency = parseInt(regularRange.value); 
+            config.pickerFrequency = parseInt(pickerRange.value); 
+            config.pickerEfficiency = parseInt(efficiencyRange.value); 
+            config.randomFilter = parseInt(filterRange.value); 
+            
+            config.isBrokenWindowEnabled = brokenWindowCheckbox.checked; // NEW
+            config.lowLitterMultiplier = parseFloat(lowMultRange.value);
+            config.highLitterThreshold = parseInt(highThreshRange.value);
+            config.highLitterMultiplier = parseFloat(highMultRange.value);
+
+            // Update display values
+            document.getElementById('regularValue').textContent = regularRange.value;
+            document.getElementById('pickerValue').textContent = pickerRange.value;
+            document.getElementById('pickerEfficiencyValue').textContent = efficiencyRange.value;
+            document.getElementById('filterValue').textContent = filterRange.value;
+            
+            document.getElementById('lowLitterMultiplierValue').textContent = lowMultRange.value;
+            document.getElementById('highLitterThresholdValue').textContent = highThreshRange.value;
+            document.getElementById('highLitterMultiplierValue').textContent = highMultRange.value;
+            
+            document.getElementById('speedValue').textContent = speedRange.value;
+
+            currentSpeed = parseInt(speedRange.value);
+        }
+
+        function attachUIListeners() {
+            document.getElementById('regularFrequency').addEventListener('input', updateConfigFromUI);
+            document.getElementById('pickerFrequency').addEventListener('input', updateConfigFromUI);
+            document.getElementById('pickerEfficiency').addEventListener('input', updateConfigFromUI);
+            document.getElementById('randomFilter').addEventListener('input', updateConfigFromUI);
+            
+            document.getElementById('lowLitterMultiplier').addEventListener('input', updateConfigFromUI);
+            document.getElementById('highLitterThreshold').addEventListener('input', updateConfigFromUI);
+            document.getElementById('highLitterMultiplier').addEventListener('input', updateConfigFromUI);
+            document.getElementById('brokenWindowEnabled').addEventListener('change', updateConfigFromUI); // NEW listener
+
+            document.getElementById('speed').addEventListener('input', updateConfigFromUI);
+
+            toggleButton.addEventListener('click', toggleSimulation);
+        }
+
+        function toggleSimulation() {
+            simulationRunning = !simulationRunning;
+            if (simulationRunning) {
+                toggleButton.textContent = 'Pause Simulation';
+                toggleButton.classList.remove('bg-green-600', 'hover:bg-green-700');
+                toggleButton.classList.add('bg-red-600', 'hover:bg-red-700');
+                lastUpdateTime = performance.now();
+                animationFrameId = requestAnimationFrame(gameLoop);
+            } else {
+                toggleButton.textContent = 'Resume Simulation';
+                toggleButton.classList.remove('bg-red-600', 'hover:bg-red-700');
+                toggleButton.classList.add('bg-green-600', 'hover:bg-green-700');
+                if (animationFrameId) {
+                    cancelAnimationFrame(animationFrameId);
+                    animationFrameId = null;
+                }
+            }
+        }
+
+        // --- Initialization on Load ---
+
+        window.onload = async () => {
+            updateConfigFromUI();
+            attachUIListeners();
+            initializeStreetBlocks();
+            initChart();
+            renderStreet(); // Initial render
+            activeAgentsEl.textContent = '0';
+            console.log("1D Multi-Agent Flow Simulator ready. Press 'Start Simulation' to begin.");
+        };
+
+    </script>
+</body>
+</html>
